@@ -8,9 +8,11 @@ import "./ItPubToken.sol";
 
 contract SmartBridge {
     event SwapInitialized (
+        address tokenToRedeem,
         address to,
         uint256 amount,
-        uint256 nonce
+        uint256 nonce,
+        uint256 targetChainId
     );
 
     event Redeem (
@@ -18,35 +20,58 @@ contract SmartBridge {
         uint256 amount
     );
 
-    ItPubToken private token;
     uint256 private swapsNum;
     address private validator;
-    mapping(uint => bool) private seenNonces;
+    uint256 private currentChainId;
 
-    constructor(address token_) {
-        token = ItPubToken(token_);
+    mapping(bytes32 => bool) private seenMessages;
+    mapping(uint256 => bool) private allowedTargetChainIds;
+    mapping(address => address) private allowedTokens;
+
+    constructor(uint256 _currentChainId) {
         validator = msg.sender;
+        currentChainId = _currentChainId; // Need for mocking in tests. Can be replaced with block.chainid comparison
     }
 
-    function swap(address to, uint256 amount) public returns (uint256 nonce) {
-        token.burn(msg.sender, amount);
+    modifier onlyValidator() {
+        require(msg.sender == validator, "Only validator can do that");
+        _;
+    }
+
+    function swap(address token, address to, uint256 amount, uint256 targetChainId) public returns (uint256 nonce) {
+        require(allowedTokens[token] != address(0), "Token isn't allowed");
+        require(allowedTargetChainIds[targetChainId], "Target chain id isn't allowed");
+
+        ItPubToken(token).burn(msg.sender, amount);
         nonce = swapsNum;
-        emit SwapInitialized(to, amount, nonce);
+        emit SwapInitialized(allowedTokens[token], to, amount, nonce, targetChainId);
         swapsNum++;
     }
 
-    function redeem(address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s) public {
-        require(checkSign(to, amount, nonce, v, r, s), "Wrong signer");
-        require(!seenNonces[nonce], "Nonce already processed");
-        token.mint(to, amount);
+    function redeem(address tokenToRedeem, address to, uint256 amount, uint256 nonce, uint256 targetChainId, uint8 v, bytes32 r, bytes32 s) public {
+        require(targetChainId == currentChainId, "Message intended for other chain");
+
+        bytes32 message = keccak256(abi.encodePacked(tokenToRedeem, to, amount, nonce, targetChainId));
+        address realAddress = ecrecover(hashMessage(message), v, r, s);
+
+        require(realAddress == validator, "Wrong signer");
+        require(!seenMessages[message], "This request already processed");
+
+        ItPubToken(tokenToRedeem).mint(to, amount);
         emit Redeem(to, amount);
-        seenNonces[nonce] = true;
+        seenMessages[message] = true;
     }
 
-    function checkSign(address to, uint256 amount, uint256 nonce, uint8 v, bytes32 r, bytes32 s) private view returns (bool) {
-        bytes32 message = keccak256(abi.encodePacked(to, amount, nonce));
-        address realAddress = ecrecover(hashMessage(message), v, r, s);
-        return realAddress == validator;
+    function updateChainById(uint256 targetChainId, bool isAllowed) public onlyValidator {
+        allowedTargetChainIds[targetChainId] = isAllowed;
+    }
+
+    function includeToken(address tokenToBurn, address tokenToMint) public onlyValidator {
+        allowedTokens[tokenToBurn] = tokenToMint;
+    }
+
+    function excludeToken(address token) public onlyValidator {
+        allowedTokens[token] = address(0);
     }
 
     function hashMessage(bytes32 message) private pure returns (bytes32) {

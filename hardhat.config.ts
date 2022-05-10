@@ -8,6 +8,9 @@ import "hardhat-gas-reporter";
 import "solidity-coverage";
 import "./task/swap";
 import "./task/redeem";
+import "./task/updateChainById"
+import "./task/includeToken"
+import "./task/excludeToken"
 
 dotenv.config();
 

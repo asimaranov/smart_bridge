@@ -8,6 +8,8 @@ import { ethers } from "hardhat";
 async function main() {
 
   const ItPubToken = await ethers.getContractFactory("ItPubToken");
+  const { chainId } = await ethers.provider.getNetwork();
+
   const itPubToken = await ItPubToken.deploy();
 
   await itPubToken.deployed();
@@ -15,7 +17,9 @@ async function main() {
   console.log("Token deployed to:", itPubToken.address);
 
   const Bridge = await ethers.getContractFactory("SmartBridge");
-  const bridge = await Bridge.deploy(itPubToken.address);
+  const bridge = await Bridge.deploy(chainId);
+  await bridge.deployed();
+
   console.log("Bridge deployed to:", bridge.address);
 
   await itPubToken.changeOwner(bridge.address);
